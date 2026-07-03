@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap');
         
@@ -549,69 +550,206 @@
             showGameToast('success', 'Esfera Forjada', `Se ha creado una nueva variable de tipo ${activeCategory}.`);
         }
 
-        // --- EXPORTACIÓN A PDF (html2pdf) ---
-        function exportToPDF() {
-            const authorVal = document.getElementById('author-name').value || 'Investigador Anónimo';
-            const dateObj = new Date();
-            const dateStr = dateObj.toLocaleDateString('es-ES');
+        // --- EXPORTACIÓN A PDF (jsPDF directo, sin capturar HTML) ---
+        // Se elimina la dependencia de html2canvas/html2pdf para evitar PDFs en blanco
+        // causados por elementos ocultos, fuera de pantalla o estilos no renderizables.
+        function getBubbleText(el) {
+            const label = el.querySelector('span:last-child');
+            return (label ? label.textContent : el.textContent)
+                .replace(/^\s*[PICOS]\s*/, '')
+                .trim();
+        }
 
-            // Preparar datos para el PDF
-            document.getElementById('pdf-author').innerText = authorVal;
-            document.getElementById('pdf-date').innerText = dateStr;
+        function sanitizeFileName(value) {
+            return String(value || 'Investigador')
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-zA-Z0-9_-]+/g, '_')
+                .replace(/^_+|_+$/g, '') || 'Investigador';
+        }
 
+        function collectPicosState() {
             const state = {};
             let hasItems = false;
 
             ['P', 'I', 'C', 'O', 'S'].forEach(cat => {
                 const zoneItems = Array.from(document.getElementById(`zone-${cat}`).children);
-                state[cat] = zoneItems.map(el => ({ text: el.innerText.replace(cat, '').trim() }));
-                
-                const targetPdfList = document.getElementById(`pdf-list-${cat}`);
-                targetPdfList.innerHTML = '';
-                
-                if (state[cat] && state[cat].length > 0) {
-                    hasItems = true;
-                    state[cat].forEach(item => {
-                        const li = document.createElement('li');
-                        li.className = 'text-slate-800 text-sm py-0.5 leading-relaxed font-medium';
-                        li.innerText = item.text;
-                        targetPdfList.appendChild(li);
-                    });
-                } else {
-                    const li = document.createElement('li');
-                    li.className = 'text-slate-400 text-sm py-0.5 italic';
-                    li.innerText = 'No se han definido variables en esta categoría.';
-                    targetPdfList.appendChild(li);
-                }
+                state[cat] = zoneItems.map(getBubbleText).filter(Boolean);
+                if (state[cat].length > 0) hasItems = true;
             });
+
+            return { state, hasItems };
+        }
+
+        function exportToPDF() {
+            const authorVal = document.getElementById('author-name').value.trim() || 'Investigador Anónimo';
+            const dateStr = new Date().toLocaleDateString('es-MX');
+            const { state, hasItems } = collectPicosState();
 
             if (!hasItems) {
                 showGameToast('warning', 'Tablero Vacío', 'Asigna al menos una esfera al tablero antes de exportar el reporte.');
                 return;
             }
 
-            // Ejecución de html2pdf
-            const element = document.getElementById('pdf-template');
-            element.style.display = 'block'; // Hacer visible para calcular tamaño
+            const JsPDFConstructor = window.jspdf && window.jspdf.jsPDF;
 
-            const opt = {
-                margin:       15,
-                filename:     `Pregunta_PICOS_Reporte_${authorVal.replace(/\s+/g, '_')}.pdf`,
-                image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2.5, useCORS: true, letterRendering: true },
-                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-            };
+            if (!JsPDFConstructor) {
+                showGameToast('error', 'Librería no cargada', 'No se pudo cargar jsPDF. Revisa tu conexión e intenta de nuevo.');
+                openPrintableFallback(authorVal, dateStr, state);
+                return;
+            }
 
-            showGameToast('info', 'Compilando Documento', 'El sistema está preparando su diseño interactivo PICOS.');
+            showGameToast('info', 'Generando PDF', 'Creando el reporte directamente, sin captura de pantalla.');
 
-            html2pdf().set(opt).from(element).toPdf().get('pdf').then(function (pdf) {
-                element.style.display = 'none'; // Ocultar nuevamente
-            }).save().then(() => {
-                showGameToast('success', 'Reporte Descargado', 'El PDF ha sido generado y descargado exitosamente.');
-            }).catch(err => {
-                element.style.display = 'none';
-                showGameToast('error', 'Error en Exportación', 'Ocurrió un problema al generar el PDF.');
+            try {
+                const doc = new JsPDFConstructor({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+                const pageWidth = doc.internal.pageSize.getWidth();
+                const pageHeight = doc.internal.pageSize.getHeight();
+                const margin = 16;
+                const usableWidth = pageWidth - margin * 2;
+                let y = 18;
+
+                const colors = {
+                    P: [37, 99, 235],
+                    I: [5, 150, 105],
+                    C: [217, 119, 6],
+                    O: [220, 38, 38],
+                    S: [124, 58, 237]
+                };
+
+                const sectionTitles = {
+                    P: 'P - Población / Paciente',
+                    I: 'I - Intervención',
+                    C: 'C - Comparación',
+                    O: 'O - Resultados (Outcomes)',
+                    S: 'S - Diseño de Estudio'
+                };
+
+                function addPageIfNeeded(requiredHeight) {
+                    if (y + requiredHeight > pageHeight - 18) {
+                        addFooter();
+                        doc.addPage();
+                        y = 18;
+                    }
+                }
+
+                function addFooter() {
+                    const currentPage = doc.internal.getNumberOfPages();
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(8);
+                    doc.setTextColor(120, 120, 120);
+                    doc.text('Documento generado por Constructor PICOS Interactivo.', pageWidth / 2, pageHeight - 10, { align: 'center' });
+                    doc.text(`Página ${currentPage}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+                }
+
+                // Encabezado
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(16);
+                doc.setTextColor(15, 23, 42);
+                doc.text('FORMULACIÓN DE PREGUNTA CLÍNICA', pageWidth / 2, y, { align: 'center' });
+                y += 8;
+
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(12);
+                doc.setTextColor(71, 85, 105);
+                doc.text('Metodología P.I.C.O.S.', pageWidth / 2, y, { align: 'center' });
+                y += 8;
+
+                doc.setDrawColor(30, 41, 59);
+                doc.setLineWidth(0.4);
+                doc.line(margin, y, pageWidth - margin, y);
+                y += 9;
+
+                // Datos generales
+                doc.setFillColor(241, 245, 249);
+                doc.roundedRect(margin, y - 5, usableWidth, 14, 2, 2, 'F');
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(10);
+                doc.setTextColor(51, 65, 85);
+                doc.text('Investigador:', margin + 4, y + 1);
+                doc.text('Fecha:', pageWidth - margin - 42, y + 1);
+
+                doc.setFont('helvetica', 'normal');
+                doc.setTextColor(15, 23, 42);
+                const authorLines = doc.splitTextToSize(authorVal, usableWidth - 70);
+                doc.text(authorLines[0], margin + 31, y + 1);
+                doc.text(dateStr, pageWidth - margin - 27, y + 1);
+                y += 18;
+
+                // Secciones PICOS
+                ['P', 'I', 'C', 'O', 'S'].forEach(cat => {
+                    const items = state[cat].length > 0 ? state[cat] : ['No se han definido variables en esta categoría.'];
+                    const estimatedHeight = 12 + (items.length * 8);
+                    addPageIfNeeded(estimatedHeight);
+
+                    const color = colors[cat];
+                    doc.setTextColor(color[0], color[1], color[2]);
+                    doc.setFont('helvetica', 'bold');
+                    doc.setFontSize(12);
+                    doc.text(sectionTitles[cat], margin, y);
+                    y += 3;
+                    doc.setDrawColor(color[0], color[1], color[2]);
+                    doc.setLineWidth(0.25);
+                    doc.line(margin, y, pageWidth - margin, y);
+                    y += 6;
+
+                    items.forEach(item => {
+                        const isEmpty = item.startsWith('No se han definido');
+                        doc.setFont('helvetica', isEmpty ? 'italic' : 'normal');
+                        doc.setFontSize(10);
+                        doc.setTextColor(isEmpty ? 120 : 30, isEmpty ? 120 : 41, isEmpty ? 120 : 59);
+
+                        const lines = doc.splitTextToSize(item, usableWidth - 8);
+                        addPageIfNeeded((lines.length * 5) + 5);
+                        doc.text('•', margin + 2, y);
+                        doc.text(lines, margin + 7, y);
+                        y += (lines.length * 5) + 3;
+                    });
+
+                    y += 4;
+                });
+
+                addFooter();
+
+                const fileName = `Pregunta_PICOS_Reporte_${sanitizeFileName(authorVal)}.pdf`;
+                doc.save(fileName);
+                showGameToast('success', 'Reporte Descargado', 'El PDF fue generado con jsPDF y ya no depende de capturar un elemento HTML oculto.');
+            } catch (err) {
+                console.error('Error al generar PDF:', err);
+                showGameToast('error', 'Error en Exportación', 'Se abrió una versión imprimible como respaldo.');
+                openPrintableFallback(authorVal, dateStr, state);
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>"]/g, function (char) {
+                return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char];
             });
+        }
+
+        function openPrintableFallback(authorVal, dateStr, state) {
+            const titles = {
+                P: 'P - Población / Paciente',
+                I: 'I - Intervención',
+                C: 'C - Comparación',
+                O: 'O - Resultados (Outcomes)',
+                S: 'S - Diseño de Estudio'
+            };
+            const colors = { P: '#2563eb', I: '#059669', C: '#d97706', O: '#dc2626', S: '#7c3aed' };
+            const sections = ['P', 'I', 'C', 'O', 'S'].map(cat => {
+                const items = state[cat].length ? state[cat] : ['No se han definido variables en esta categoría.'];
+                const lis = items.map(item => `<li>${escapeHtml(item)}</li>`).join('');
+                return `<section><h2 style="color:${colors[cat]};border-bottom:1px solid ${colors[cat]};padding-bottom:4px;">${titles[cat]}</h2><ul>${lis}</ul></section>`;
+            }).join('');
+
+            const printable = window.open('', '_blank');
+            if (!printable) return;
+
+            printable.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Reporte PICOS</title><style>
+                body{font-family:Arial, sans-serif;color:#0f172a;margin:24px;line-height:1.4}h1{text-align:center;font-size:20px;margin:0;text-transform:uppercase}h2{font-size:15px;margin-top:22px}.subtitle{text-align:center;color:#475569;margin:8px 0 18px}.meta{display:flex;justify-content:space-between;background:#f1f5f9;padding:10px;border-radius:6px;margin:16px 0 24px}li{margin:6px 0}@media print{button{display:none}body{margin:14mm}}
+            </style></head><body><button onclick="window.print()" style="float:right;padding:8px 12px;">Imprimir / Guardar como PDF</button><h1>Formulación de Pregunta Clínica</h1><div class="subtitle">Metodología P.I.C.O.S.</div><div class="meta"><div><strong>Investigador:</strong> ${escapeHtml(authorVal)}</div><div><strong>Fecha:</strong> ${escapeHtml(dateStr)}</div></div>${sections}<footer style="border-top:1px solid #cbd5e1;margin-top:32px;padding-top:12px;text-align:center;color:#64748b;font-size:12px;">Documento generado por Constructor PICOS Interactivo.</footer></body></html>`);
+            printable.document.close();
+            printable.focus();
+            setTimeout(() => printable.print(), 300);
         }
 
         // Inicializar
@@ -621,3 +759,4 @@
     </script>
 </body>
 </html>
+
