@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Formulador Interactivo PICOS - Videojuego Educativo</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome para Iconos -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- html2pdf.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@300..700&family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap');
+        
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: radial-gradient(circle at top left, #1e293b, #0f172a);
+            color: #f8fafc;
+            overflow-x: hidden;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .font-game {
+            font-family: 'Fredoka', sans-serif;
+        }
+
+        /* Estilos de las esferas/burbujas flotantes de categorías */
+        .bubble {
+            border-radius: 9999px;
+            padding: 0.5rem 1.25rem;
+            font-weight: 600;
+            cursor: grab;
+            transition: box-shadow 0.2s;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.18);
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            user-select: none;
+            border: 2px solid rgba(255,255,255,0.15);
+            font-size: 0.9rem;
+            margin: 0.25rem;
+        }
+        
+        /* Animación de Físicas/Flote para Burbujas en el Pool */
+        @keyframes floatBubble {
+            0%, 100% { transform: translate(0, 0) scale(1); }
+            25% { transform: translate(3px, -4px) scale(1.02); }
+            50% { transform: translate(-2px, 3px) scale(0.98); }
+            75% { transform: translate(4px, 2px) scale(1.01); }
+        }
+
+        /* Esta clase solo se aplica cuando están en el inventario */
+        .bubble.in-pool {
+            animation: floatBubble var(--float-dur, 5s) ease-in-out infinite;
+            animation-delay: var(--float-del, 0s);
+        }
+
+        .bubble:active { 
+            cursor: grabbing; 
+            transform: scale(0.95) !important; /* Detiene el flote al hacer clic/arrastrar */
+            animation: none !important;
+        }
+        
+        .bubble:hover:not(:active) { 
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.4); 
+        }
+
+        .bubble-P { background: linear-gradient(135deg, #3b82f6, #1d4ed8); } /* Azul */
+        .bubble-I { background: linear-gradient(135deg, #10b981, #047857); } /* Verde */
+        .bubble-C { background: linear-gradient(135deg, #f59e0b, #b45309); } /* Naranja */
+        .bubble-O { background: linear-gradient(135deg, #ef4444, #b91c1c); } /* Rojo */
+        .bubble-S { background: linear-gradient(135deg, #8b5cf6, #6d28d9); } /* Morado */
+
+        /* Zonas de Dropeo */
+        .drop-zone {
+            background: rgba(30, 41, 59, 0.6);
+            border: 2px dashed rgba(148, 163, 184, 0.3);
+            border-radius: 1rem;
+            min-height: 80px;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-wrap: wrap;
+            align-content: flex-start;
+            padding: 0.5rem;
+        }
+        
+        .drop-zone.drag-over {
+            border-color: #38bdf8;
+            background-color: rgba(56, 189, 248, 0.15);
+            transform: scale(1.01);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.2) inset;
+        }
+
+        #pool-container {
+            overflow-y: auto;
+            align-content: flex-start;
+        }
+
+        /* Ocultar barra de scroll para estética limpia */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden">
+
+    <!-- Navbar / Controles Superiores -->
+    <header class="bg-slate-800/80 backdrop-blur-md border-b border-slate-700 p-4 shadow-lg shrink-0 z-10">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="bg-gradient-to-tr from-blue-500 to-purple-500 p-2 rounded-lg shadow-lg">
+                    <i class="fas fa-gamepad text-white text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-game font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
+                        Constructor PICOS
+                    </h1>
+                    <p class="text-xs text-slate-400 uppercase tracking-wider font-semibold">Simulador de Investigación</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3 w-full md:w-auto">
+                <div class="relative w-full md:w-64">
+                    <i class="fas fa-user-astronaut absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400"></i>
+                    <input type="text" id="author-name" placeholder="Nombre del Investigador..." 
+                        class="w-full bg-slate-900 border border-slate-600 rounded-full py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all text-white placeholder-slate-500">
+                </div>
+                
+                <button onclick="openAddModal()" class="bg-slate-700 hover:bg-slate-600 text-white p-2 rounded-full transition-colors w-10 h-10 flex items-center justify-center shadow-lg group" title="Crear Esfera">
+                    <i class="fas fa-plus group-hover:scale-110 transition-transform"></i>
+                </button>
+                
+                <button onclick="exportToPDF()" class="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 text-white px-5 py-2 rounded-full text-sm font-bold shadow-lg shadow-green-500/20 transition-all transform hover:-translate-y-0.5 flex items-center gap-2">
+                    <i class="fas fa-file-pdf"></i> Exportar
+                </button>
+                
+                <button onclick="resetAll()" class="bg-slate-700 hover:bg-red-500/20 hover:text-red-400 text-slate-300 p-2 rounded-full transition-colors w-10 h-10 flex items-center justify-center shadow-lg group" title="Reiniciar Tablero">
+                    <i class="fas fa-undo-alt group-hover:-rotate-180 transition-transform duration-500"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Área de Juego Principal -->
+    <main class="flex-1 flex overflow-hidden p-4 gap-6 max-w-7xl mx-auto w-full">
+        
+        <!-- Panel Izquierdo: Pool de Esferas -->
+        <aside class="w-1/3 flex flex-col bg-slate-800/40 rounded-2xl border border-slate-700/50 backdrop-blur-sm shadow-xl overflow-hidden">
+            <div class="bg-slate-800/80 p-3 border-b border-slate-700 flex justify-between items-center">
+                <h2 class="font-game text-lg text-slate-200 flex items-center">
+                    <i class="fas fa-box-open mr-2 text-blue-400"></i>Inventario
+                </h2>
+                <div class="flex items-center gap-2">
+                    <button onclick="clearPool()" class="text-slate-400 hover:text-red-500 bg-slate-700/50 hover:bg-slate-700 p-1.5 rounded-lg transition-colors shadow-sm flex items-center justify-center" title="Borrar todas las esferas del inventario">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                    <span id="pool-count" class="bg-blue-500/20 text-blue-400 text-xs font-bold px-2 py-1.5 rounded-full">0</span>
+                </div>
+            </div>
+            <!-- Dropzone del pool -->
+            <div id="pool-container" class="p-4 flex-1 drop-zone flex flex-wrap gap-2" ondragover="allowDrop(event)" ondrop="drop(event, 'pool')">
+                <!-- Esferas iniciales generadas por JS -->
+            </div>
+        </aside>
+
+        <!-- Panel Derecho: Tablero PICOS -->
+        <section class="w-2/3 flex flex-col gap-3 overflow-y-auto pr-2 pb-20">
+            
+            <!-- P: Población -->
+            <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700 shadow-md">
+                <div class="flex items-center gap-2 mb-2">
+                    <div class="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-game font-bold text-lg">P</div>
+                    <div>
+                        <h3 class="font-bold text-slate-200 leading-tight">Población / Paciente</h3>
+                        <p class="text-xs text-slate-400">¿Quiénes son los sujetos del estudio?</p>
+                    </div>
+                </div>
+                <div id="zone-P" class="drop-zone w-full" ondragover="allowDrop(event)" ondrop="drop(event, 'P')"></div>
+            </div>
+
+            <!-- I: Intervención -->
+            <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700 shadow-md">
+                <div class="flex items-center gap-2 mb-2">
+                    <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-game font-bold text-lg">I</div>
+                    <div>
+                        <h3 class="font-bold text-slate-200 leading-tight">Intervención</h3>
+                        <p class="text-xs text-slate-400">¿Qué tratamiento o prueba se evaluará?</p>
+                    </div>
+                </div>
+                <div id="zone-I" class="drop-zone w-full" ondragover="allowDrop(event)" ondrop="drop(event, 'I')"></div>
+            </div>
+
+            <!-- C: Comparación -->
+            <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700 shadow-md">
+                <div class="flex items-center gap-2 mb-2">
+                    <div class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-game font-bold text-lg">C</div>
+                    <div>
+                        <h3 class="font-bold text-slate-200 leading-tight">Comparación</h3>
+                        <p class="text-xs text-slate-400">¿Con qué se compara la intervención? (Opcional)</p>
+                    </div>
+                </div>
+                <div id="zone-C" class="drop-zone w-full" ondragover="allowDrop(event)" ondrop="drop(event, 'C')"></div>
+            </div>
+
+            <!-- O: Outcomes (Resultados) -->
+            <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700 shadow-md">
+                <div class="flex items-center gap-2 mb-2">
+                    <div class="w-8 h-8 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center font-game font-bold text-lg">O</div>
+                    <div>
+                        <h3 class="font-bold text-slate-200 leading-tight">Outcomes (Resultados)</h3>
+                        <p class="text-xs text-slate-400">¿Qué efectos o desenlaces se medirán?</p>
+                    </div>
+                </div>
+                <div id="zone-O" class="drop-zone w-full" ondragover="allowDrop(event)" ondrop="drop(event, 'O')"></div>
+            </div>
+
+            <!-- S: Study Design (Diseño de Estudio) -->
+            <div class="bg-slate-800/60 rounded-xl p-3 border border-slate-700 shadow-md">
+                <div class="flex items-center gap-2 mb-2">
+                    <div class="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center font-game font-bold text-lg">S</div>
+                    <div>
+                        <h3 class="font-bold text-slate-200 leading-tight">Study Design</h3>
+                        <p class="text-xs text-slate-400">¿Qué tipo de estudio es el más adecuado?</p>
+                    </div>
+                </div>
+                <div id="zone-S" class="drop-zone w-full" ondragover="allowDrop(event)" ondrop="drop(event, 'S')"></div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- Modal para Añadir Esfera -->
+    <div id="add-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300">
+        <div class="bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md shadow-2xl transform scale-95 transition-transform duration-300" id="add-modal-content">
+            <h2 class="text-xl font-game font-bold text-white mb-4"><i class="fas fa-magic text-blue-400 mr-2"></i>Forjar Nueva Esfera</h2>
+            
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-slate-300 mb-2">Categoría PICOS</label>
+                <div class="flex gap-2">
+                    <button onclick="selectCategory('P')" id="btn-cat-P" class="flex-1 py-2 rounded-lg font-bold border-2 border-slate-600 text-slate-400 hover:border-blue-500 hover:text-blue-400 transition-colors">P</button>
+                    <button onclick="selectCategory('I')" id="btn-cat-I" class="flex-1 py-2 rounded-lg font-bold border-2 border-slate-600 text-slate-400 hover:border-emerald-500 hover:text-emerald-400 transition-colors">I</button>
+                    <button onclick="selectCategory('C')" id="btn-cat-C" class="flex-1 py-2 rounded-lg font-bold border-2 border-slate-600 text-slate-400 hover:border-amber-500 hover:text-amber-400 transition-colors">C</button>
+                    <button onclick="selectCategory('O')" id="btn-cat-O" class="flex-1 py-2 rounded-lg font-bold border-2 border-slate-600 text-slate-400 hover:border-red-500 hover:text-red-400 transition-colors">O</button>
+                    <button onclick="selectCategory('S')" id="btn-cat-S" class="flex-1 py-2 rounded-lg font-bold border-2 border-slate-600 text-slate-400 hover:border-purple-500 hover:text-purple-400 transition-colors">S</button>
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-sm font-medium text-slate-300 mb-2">Descripción de la variable</label>
+                <textarea id="new-item-text" rows="3" class="w-full bg-slate-900 border border-slate-600 rounded-xl p-3 text-white focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none" placeholder="Ej: Adultos mayores con hipertensión..."></textarea>
+            </div>
+
+            <div class="flex justify-end gap-3">
+                <button onclick="closeAddModal()" class="px-4 py-2 rounded-lg text-slate-300 hover:bg-slate-700 transition-colors font-semibold">Cancelar</button>
+                <button onclick="createCustomBubble()" class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold shadow-lg shadow-blue-500/20 transition-colors flex items-center gap-2">
+                    <i class="fas fa-hammer"></i> Forjar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Contenedor del Toast de Notificaciones -->
+    <div id="game-toast" class="fixed bottom-6 right-6 max-w-sm w-full bg-slate-800 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] border-l-4 p-4 transform transition-all duration-300 translate-y-20 opacity-0 z-50 pointer-events-none">
+        <div class="flex items-start gap-3">
+            <div id="toast-icon" class="mt-0.5"></div>
+            <div>
+                <h4 id="toast-title" class="font-bold text-white text-sm"></h4>
+                <p id="toast-message" class="text-xs text-slate-300 mt-1"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Plantilla PDF Oculta (Estilo Académico) -->
+    <div id="pdf-template" class="hidden bg-white text-black p-8 font-serif" style="width: 210mm; min-height: 297mm; display: none; position: absolute; left: -9999px;">
+        <div class="border-b-2 border-slate-800 pb-4 mb-6">
+            <h1 class="text-2xl font-bold text-center uppercase tracking-widest text-slate-900">Formulación de Pregunta Clínica</h1>
+            <h2 class="text-lg text-center font-medium text-slate-600 mt-2">Metodología P.I.C.O.S.</h2>
+        </div>
+        
+        <div class="mb-6 flex justify-between items-center bg-slate-100 p-3 rounded">
+            <div><span class="font-bold text-slate-700">Investigador:</span> <span id="pdf-author" class="italic"></span></div>
+            <div><span class="font-bold text-slate-700">Fecha:</span> <span id="pdf-date" class="italic"></span></div>
+        </div>
+
+        <div class="space-y-6">
+            <!-- P -->
+            <div>
+                <h3 class="text-lg font-bold text-blue-800 border-b border-blue-200 pb-1 mb-2">P - Población / Paciente</h3>
+                <ul id="pdf-list-P" class="list-disc list-inside pl-4 space-y-1 text-slate-800 text-sm"></ul>
+            </div>
+            <!-- I -->
+            <div>
+                <h3 class="text-lg font-bold text-emerald-800 border-b border-emerald-200 pb-1 mb-2">I - Intervención</h3>
+                <ul id="pdf-list-I" class="list-disc list-inside pl-4 space-y-1 text-slate-800 text-sm"></ul>
+            </div>
+            <!-- C -->
+            <div>
+                <h3 class="text-lg font-bold text-amber-800 border-b border-amber-200 pb-1 mb-2">C - Comparación</h3>
+                <ul id="pdf-list-C" class="list-disc list-inside pl-4 space-y-1 text-slate-800 text-sm"></ul>
+            </div>
+            <!-- O -->
+            <div>
+                <h3 class="text-lg font-bold text-red-800 border-b border-red-200 pb-1 mb-2">O - Resultados (Outcomes)</h3>
+                <ul id="pdf-list-O" class="list-disc list-inside pl-4 space-y-1 text-slate-800 text-sm"></ul>
+            </div>
+            <!-- S -->
+            <div>
+                <h3 class="text-lg font-bold text-purple-800 border-b border-purple-200 pb-1 mb-2">S - Diseño de Estudio</h3>
+                <ul id="pdf-list-S" class="list-disc list-inside pl-4 space-y-1 text-slate-800 text-sm"></ul>
+            </div>
+        </div>
+
+        <div class="mt-12 pt-6 border-t border-slate-300 text-center text-xs text-slate-500">
+            Documento generado por Constructor PICOS Interactivo.
+        </div>
+    </div>
+
+    <!-- Scripts Principales -->
+    <script>
+        let draggedElement = null;
+        let toastTimeout;
+        let activeCategory = 'P';
+        let bubbleCounter = 0;
+
+        // Datos Iniciales por Defecto
+        const initialBubbles = [
+            { cat: 'P', text: 'Pacientes adultos (>18 años)' },
+            { cat: 'P', text: 'Diagnosticados con Diabetes Tipo 2' },
+            { cat: 'I', text: 'Terapia cognitivo-conductual' },
+            { cat: 'I', text: 'Administración de Metformina' },
+            { cat: 'C', text: 'Placebo' },
+            { cat: 'C', text: 'Cuidado estándar habitual' },
+            { cat: 'O', text: 'Reducción de mortalidad' },
+            { cat: 'O', text: 'Mejora en calidad de vida' },
+            { cat: 'S', text: 'Ensayo Clínico Aleatorizado (ECA)' },
+            { cat: 'S', text: 'Estudio de Cohorte' }
+        ];
+
+        // --- SISTEMA DE NOTIFICACIONES MEJORADO (3 Segundos) ---
+        function showGameToast(type, title, message) {
+            const toast = document.getElementById('game-toast');
+            const titleEl = document.getElementById('toast-title');
+            const msgEl = document.getElementById('toast-message');
+            const iconEl = document.getElementById('toast-icon');
+
+            titleEl.innerText = title;
+            msgEl.innerText = message;
+
+            // Reiniciar clases
+            toast.className = 'fixed bottom-6 right-6 max-w-sm w-full bg-slate-800 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.5)] border-l-4 p-4 transform transition-all duration-300 translate-y-20 opacity-0 z-50 pointer-events-none';
+
+            if (type === 'success') {
+                toast.classList.add('border-green-500');
+                iconEl.className = 'fas fa-check-circle text-green-500 text-2xl';
+            } else if (type === 'error') {
+                toast.classList.add('border-red-500');
+                iconEl.className = 'fas fa-times-circle text-red-500 text-2xl';
+            } else if (type === 'warning') {
+                toast.classList.add('border-amber-500');
+                iconEl.className = 'fas fa-exclamation-triangle text-amber-500 text-2xl';
+            } else {
+                toast.classList.add('border-blue-500');
+                iconEl.className = 'fas fa-info-circle text-blue-500 text-2xl';
+            }
+
+            // Mostrar suavemente
+            setTimeout(() => {
+                toast.classList.remove('translate-y-20', 'opacity-0');
+            }, 10);
+
+            // Limpiar timeout anterior si existe para evitar superposiciones
+            if (toastTimeout) clearTimeout(toastTimeout);
+
+            // OCULTAR A LOS 3 SEGUNDOS (3000 ms) EXACTOS
+            toastTimeout = setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000); 
+        }
+
+        // --- SISTEMA DE ARRASTRE Y SOLTAR (DRAG & DROP) ---
+        function handleDragStart(e) {
+            draggedElement = e.target;
+            e.target.style.opacity = '0.5';
+            e.target.classList.remove('in-pool'); // Detener animación al agarrar
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', e.target.id);
+        }
+
+        function handleDragEnd(e) {
+            e.target.style.opacity = '1';
+            draggedElement = null;
+            document.querySelectorAll('.drop-zone').forEach(zone => {
+                zone.classList.remove('drag-over');
+            });
+            
+            // Re-evaluar si quedó en el pool para devolverle su física de burbuja
+            if (e.target.parentElement && e.target.parentElement.id === 'pool-container') {
+                e.target.classList.add('in-pool');
+            }
+            
+            updateEngine();
+        }
+
+        function allowDrop(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (e.currentTarget.classList.contains('drop-zone')) {
+                e.currentTarget.classList.add('drag-over');
+            }
+        }
+
+        function drop(e, zoneType) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            
+            const dataId = e.dataTransfer.getData('text/plain');
+            const el = document.getElementById(dataId);
+            
+            if (el) {
+                // Validación: Si es zona PICOS específica, debe coincidir la categoría
+                const itemCat = el.getAttribute('data-cat');
+                if (zoneType !== 'pool' && zoneType !== itemCat) {
+                    showGameToast('error', 'Movimiento Inválido', `Esta esfera pertenece a la categoría ${itemCat}, no puedes colocarla en ${zoneType}.`);
+                    return;
+                }
+
+                e.currentTarget.appendChild(el);
+                
+                if (zoneType === 'pool') {
+                    showGameToast('warning', 'Esfera devuelta', 'Has regresado la variable al inventario.');
+                    // La clase 'in-pool' se reasigna en el dragEnd para iniciar las físicas nuevamente
+                } else {
+                    showGameToast('success', '¡Excelente movimiento!', `Variable asignada correctamente a la zona ${zoneType}.`);
+                    el.classList.remove('in-pool'); // Se vuelve fija al salir del pool
+                }
+            }
+        }
+
+        // Event listeners globales para limpiar hover states
+        document.addEventListener('dragleave', (e) => {
+            if (e.target.classList && e.target.classList.contains('drop-zone')) {
+                e.target.classList.remove('drag-over');
+            }
+        });
+
+        // --- CREACIÓN Y GESTIÓN DE ELEMENTOS ---
+        function createBubbleElement(cat, text) {
+            bubbleCounter++;
+            const div = document.createElement('div');
+            div.id = `bubble-${bubbleCounter}`;
+            // Se le asigna "in-pool" por defecto ya que nacen en el inventario
+            div.className = `bubble bubble-${cat} in-pool`;
+            div.draggable = true;
+            div.setAttribute('data-cat', cat);
+            
+            // Físicas asincrónicas: Asignar tiempos aleatorios a la animación CSS de cada burbuja
+            const duration = (3 + Math.random() * 4).toFixed(2); // Entre 3 y 7 segundos
+            const delay = -(Math.random() * 5).toFixed(2); // Desfase negativo para no empezar iguales
+            div.style.setProperty('--float-dur', `${duration}s`);
+            div.style.setProperty('--float-del', `${delay}s`);
+
+            div.innerHTML = `
+                <span class="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold text-white shadow-inner">${cat}</span>
+                <span>${text}</span>
+            `;
+
+            div.addEventListener('dragstart', handleDragStart);
+            div.addEventListener('dragend', handleDragEnd);
+            
+            return div;
+        }
+
+        function initBubbles() {
+            const pool = document.getElementById('pool-container');
+            pool.innerHTML = '';
+            initialBubbles.forEach(item => {
+                pool.appendChild(createBubbleElement(item.cat, item.text));
+            });
+            updateEngine();
+        }
+
+        function clearPool() {
+            const pool = document.getElementById('pool-container');
+            if (pool.children.length === 0) {
+                showGameToast('info', 'Inventario Vacío', 'No hay variables para eliminar en el inventario.');
+                return;
+            }
+            
+            // Confirmación antes de eliminar permanentemente
+            if (confirm('¿Estás seguro de que deseas eliminar todas las esferas del inventario? (No afectará las que estén en el tablero)')) {
+                pool.innerHTML = '';
+                updateEngine();
+                showGameToast('success', 'Inventario Limpio', 'Se han borrado todas las esferas del inventario exitosamente.');
+            }
+        }
+
+        function updateEngine() {
+            // Actualizar conteo de pool
+            const poolCount = document.getElementById('pool-container').children.length;
+            document.getElementById('pool-count').innerText = `${poolCount} restantes`;
+        }
+
+        function resetAll() {
+            const pool = document.getElementById('pool-container');
+            ['P', 'I', 'C', 'O', 'S'].forEach(cat => {
+                const zone = document.getElementById(`zone-${cat}`);
+                while (zone.firstChild) {
+                    // Al regresarlas, les devolvemos la clase para que vuelvan a flotar
+                    zone.firstChild.classList.add('in-pool');
+                    pool.appendChild(zone.firstChild);
+                }
+            });
+            updateEngine();
+            showGameToast('info', 'Tablero Reiniciado', 'Todas las esferas han vuelto al inventario principal.');
+        }
+
+        // --- MODAL DE CREACIÓN ---
+        function openAddModal() {
+            document.getElementById('add-modal').classList.remove('opacity-0', 'pointer-events-none');
+            document.getElementById('add-modal-content').classList.remove('scale-95');
+            document.getElementById('new-item-text').value = '';
+            selectCategory('P'); // Reset a P
+        }
+
+        function closeAddModal() {
+            document.getElementById('add-modal').classList.add('opacity-0', 'pointer-events-none');
+            document.getElementById('add-modal-content').classList.add('scale-95');
+        }
+
+        function selectCategory(cat) {
+            activeCategory = cat;
+            // Reset styles
+            ['P', 'I', 'C', 'O', 'S'].forEach(c => {
+                const btn = document.getElementById(`btn-cat-${c}`);
+                btn.className = `flex-1 py-2 rounded-lg font-bold border-2 transition-colors border-slate-600 text-slate-400 hover:border-${getColorByCat(c)} hover:text-${getColorByCat(c)}`;
+            });
+            // Set active style
+            const activeBtn = document.getElementById(`btn-cat-${cat}`);
+            activeBtn.className = `flex-1 py-2 rounded-lg font-bold border-2 transition-colors border-${getColorByCat(cat)} text-${getColorByCat(cat)} bg-${getColorByCat(cat)}/10`;
+        }
+
+        function getColorByCat(cat) {
+            const colors = { 'P': 'blue-500', 'I': 'emerald-500', 'C': 'amber-500', 'O': 'red-500', 'S': 'purple-500' };
+            return colors[cat];
+        }
+
+        function createCustomBubble() {
+            const text = document.getElementById('new-item-text').value.trim();
+            if (!text) {
+                showGameToast('error', 'Error de Forja', 'La descripción de la variable no puede estar vacía.');
+                return;
+            }
+
+            const pool = document.getElementById('pool-container');
+            pool.appendChild(createBubbleElement(activeCategory, text));
+            
+            closeAddModal();
+            updateEngine();
+            showGameToast('success', 'Esfera Forjada', `Se ha creado una nueva variable de tipo ${activeCategory}.`);
+        }
+
+        // --- EXPORTACIÓN A PDF (html2pdf) ---
+        function exportToPDF() {
+            const authorVal = document.getElementById('author-name').value || 'Investigador Anónimo';
+            const dateObj = new Date();
+            const dateStr = dateObj.toLocaleDateString('es-ES');
+
+            // Preparar datos para el PDF
+            document.getElementById('pdf-author').innerText = authorVal;
+            document.getElementById('pdf-date').innerText = dateStr;
+
+            const state = {};
+            let hasItems = false;
+
+            ['P', 'I', 'C', 'O', 'S'].forEach(cat => {
+                const zoneItems = Array.from(document.getElementById(`zone-${cat}`).children);
+                state[cat] = zoneItems.map(el => ({ text: el.innerText.replace(cat, '').trim() }));
+                
+                const targetPdfList = document.getElementById(`pdf-list-${cat}`);
+                targetPdfList.innerHTML = '';
+                
+                if (state[cat] && state[cat].length > 0) {
+                    hasItems = true;
+                    state[cat].forEach(item => {
+                        const li = document.createElement('li');
+                        li.className = 'text-slate-800 text-sm py-0.5 leading-relaxed font-medium';
+                        li.innerText = item.text;
+                        targetPdfList.appendChild(li);
+                    });
+                } else {
+                    const li = document.createElement('li');
+                    li.className = 'text-slate-400 text-sm py-0.5 italic';
+                    li.innerText = 'No se han definido variables en esta categoría.';
+                    targetPdfList.appendChild(li);
+                }
+            });
+
+            if (!hasItems) {
+                showGameToast('warning', 'Tablero Vacío', 'Asigna al menos una esfera al tablero antes de exportar el reporte.');
+                return;
+            }
+
+            // Ejecución de html2pdf
+            const element = document.getElementById('pdf-template');
+            element.style.display = 'block'; // Hacer visible para calcular tamaño
+
+            const opt = {
+                margin:       15,
+                filename:     `Pregunta_PICOS_Reporte_${authorVal.replace(/\s+/g, '_')}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2.5, useCORS: true, letterRendering: true },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            showGameToast('info', 'Compilando Documento', 'El sistema está preparando su diseño interactivo PICOS.');
+
+            html2pdf().set(opt).from(element).toPdf().get('pdf').then(function (pdf) {
+                element.style.display = 'none'; // Ocultar nuevamente
+            }).save().then(() => {
+                showGameToast('success', 'Reporte Descargado', 'El PDF ha sido generado y descargado exitosamente.');
+            }).catch(err => {
+                element.style.display = 'none';
+                showGameToast('error', 'Error en Exportación', 'Ocurrió un problema al generar el PDF.');
+            });
+        }
+
+        // Inicializar
+        window.onload = () => {
+            initBubbles();
+        };
+    </script>
+</body>
+</html>
